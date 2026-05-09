@@ -10,11 +10,12 @@ Simulate 2 scenarios:
 
 import requests
 import pandas as pd
-import logging
 import random
 from datetime import datetime, timezone
 from pathlib import Path
-from prefect import flow, task, get_run_logger
+from prefect import flow, task
+
+from dataflow.utils.loki_handler import setup_loki_handler
 
 # ── Config
 BASE_URL = "https://api.frankfurter.app"
@@ -26,14 +27,16 @@ OUTPUT_FILE = OUTPUT_DIR / "currency_rates.csv"
 # Probability of injecting error (30% of the times)
 ERROR_RATE = 0.3
 
+logger = setup_loki_handler("logging-agent-llm", "currency-exchange-pipeline")
+logger.info("Pipeline started at %s", datetime.now().isoformat())
 
 # ----- Tasks -----
 
+
 @task(name="fetch_exchange_rates", retries=1, retry_delay_seconds=5)
 def fetch_rates(base: str, targets: list[str]) -> dict:
-    logger = get_run_logger()
+    """Fetch exchange rates from the API."""
     logger.info("Fetching rates: %s → %s", base, targets)
-
     symbols = ",".join(targets)
     url = f"{BASE_URL}/latest?from={base}&to={symbols}"
 
@@ -53,8 +56,6 @@ def fetch_rates(base: str, targets: list[str]) -> dict:
 @task(name="inject_error_simulation")
 def maybe_inject_error() -> bool:
     """Simulate error injection with probability ERROR_RATE."""
-    logger = get_run_logger()
-
     if random.random() < ERROR_RATE:
         logger.warning("Error injection triggered fetching invalid currency XXX")
         url = f"{BASE_URL}/latest?from=EUR&to=XXX"
@@ -68,17 +69,18 @@ def maybe_inject_error() -> bool:
 
 @task(name="transform_to_dataframe")
 def transform(data: dict) -> pd.DataFrame:
-    logger = get_run_logger()
-
+    """Transform raw API data into a DataFrame."""
     rows = []
     for currency, rate in data["rates"].items():
-        rows.append({
-            "extracted_at": datetime.now(timezone.utc).isoformat(),
-            "base_currency": data["base"],
-            "target_currency": currency,
-            "rate": rate,
-            "date": data["date"],
-        })
+        rows.append(
+            {
+                "extracted_at": datetime.now(timezone.utc).isoformat(),
+                "base_currency": data["base"],
+                "target_currency": currency,
+                "rate": rate,
+                "date": data["date"],
+            }
+        )
 
     df = pd.DataFrame(rows)
     logger.info("Transformed %d rows", len(df))
@@ -87,8 +89,7 @@ def transform(data: dict) -> pd.DataFrame:
 
 @task(name="save_to_csv")
 def save_csv(df: pd.DataFrame) -> str:
-    logger = get_run_logger()
-
+    """Save DataFrame to CSV, appending if file exists."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # Append to existing file if it exists, otherwise create new
@@ -103,14 +104,14 @@ def save_csv(df: pd.DataFrame) -> str:
 
 # ── Flow ──────────────────────────────────────────────────────
 
+
 @flow(
     name="currency-exchange-pipeline",
     description="Fetches EUR exchange rates and saves to CSV. Simulates random errors.",
     log_prints=True,
-    flow_run_name=lambda: f"currency-run-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    flow_run_name=lambda: f"currency-run-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
 )
 def currency_pipeline():
-    logger = get_run_logger()
     logger.info("Starting Currency Exchange Pipeline")
 
     # Try to inject error (30% chance) before fetching real rates

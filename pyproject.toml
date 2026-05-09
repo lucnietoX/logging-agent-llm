@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "logging-agent-llm"
+version = "1.0.0"
+description = "Prefect pipeline monitor with CrewAI Agent + LLM log analysis"
+requires-python = ">=3.13"
+
+dependencies = [
+    "prefect>=3.0.0",
+    "requests>=2.31.0",
+    "pandas>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "python-logging-loki>=0.3.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dataflow*", "config*"]
+ 
+[tool.setuptools.package-dir]
+"" = "."
